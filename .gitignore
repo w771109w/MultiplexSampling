@@ -1,0 +1,15 @@
+# 忽略系統與 R 暫存檔
+.DS_Store
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# 忽略其他資料夾
+01_data/
+03_results/
+04_reports/
+05_reference/
+
+# 若連 .Rproj 檔也不想上傳至 GitHub，取消下方這行註解：
+*.Rproj

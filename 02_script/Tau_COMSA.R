@@ -1,7 +1,10 @@
 ### calculating tau for COMSA data ###
+library(tidyverse)
+library(geosphere) 
 
-#------------data process--------------#
+#-----------Tau Evaluation for single pathogen (bm14)--COMSA data--------------#
 
+# data processing
 rm(list=ls())
 
 setwd("/Users/weiliu/Library/CloudStorage/OneDrive-JohnsHopkins/JHU/Project/Moz/01_data")
@@ -176,10 +179,10 @@ rm(moz)
 
 
 
-### tau function for survey data ###
 
-install.packages("geosphere")
-library(geosphere)
+# build cluster's polygon and convert it to sf object
+
+
 
 
 
@@ -194,14 +197,26 @@ cluster_data <- moz_age %>%
     lat = mean(lat)
   )
 
-# calculate distance matrix (unit: km)
-distance_matrix <- as.matrix(distm(cluster_data[, c("lon", "lat")], fun = distHaversine))/1000
 
+### tau functions for survey data ###
+
+# install.packages("geosphere") # for calculating distance matrix in km by lon & lat
+
+# check distance matrix (unit: km)
+distance_matrix <- as.matrix(distm(cluster_data[, c("lon", "lat")], fun = distHaversine))/1000
 max_value <- max(distance_matrix)
 
 
+distance_matrix <- as.matrix(distm(moz_age[, c("lon", "lat")], fun = distHaversine))/1000
+max_value <- max(distance_matrix)
+summary(distance_matrix[1,])
+head(distance_matrix[1,],50)
+
+
+
+####------------ tau function (excluding self) ------------#### 
 calculate_tau_r_excl <- function(data, r2) {
-  library(geosphere)
+  library(geosphere) 
   
   # calculate distance matrix (unit: km)
   distance_matrix <- as.matrix(distm(data[, c("lon", "lat")], fun = distHaversine))/1000
@@ -240,8 +255,7 @@ calculate_tau_r_excl <- function(data, r2) {
 }
 
 
-
-
+####------------ tau function (including self) ------------#### 
 calculate_tau_r_incl <- function(data, r2) {
   library(geosphere)
   
@@ -258,7 +272,7 @@ calculate_tau_r_incl <- function(data, r2) {
   
   # compute pi_i(r2) for all clusters
   for (i in 1:nrow(data)) {
-    # find cluster within (0, r2] (exclude itself)
+    # find cluster within (0, r2] (include itself)
     neighbors <- which(distance_matrix[i, ] >= 0 & distance_matrix[i, ] <= r2)
     
     # skip if no neighbors
@@ -284,14 +298,105 @@ calculate_tau_r_incl <- function(data, r2) {
 
 
 
+####------------  tau function (excluding self, without weight) ------------#### 
+calculate_tau_r_excl_no_wt <- function(data, r2) {
+  library(geosphere) 
+  
+  # calculate distance matrix (unit: km)
+  distance_matrix <- as.matrix(distm(data[, c("lon", "lat")], fun = distHaversine))/1000
+  
+  # population weighted seroprevalence Pi(.)
+  total_infections <- sum(data$s * data$p)
+  total_samples <- sum(data$s)
+  Pi_all <- total_infections / total_samples
+  
+  # create empty vector for pi_i(r2)
+  pi_values <- numeric(nrow(data))
+  
+  # compute pi_i(r2) for all clusters
+  for (i in 1:nrow(data)) {
+    # find cluster within (0, r2] (exclude itself)
+    neighbors <- which(distance_matrix[i, ] > 0 & distance_matrix[i, ] <= r2)
+    
+    # skip if no neighbors
+    if (length(neighbors) == 0) next
+    
+    # compute pi_i(r2)
+    s_p_j <- sum(data$s[neighbors] * data$p[neighbors])
+    s_j <- sum(data$s[neighbors])
+    pi_values[i] <- s_p_j / s_j
+  }
+  
+  # compute Pi(r2)
+  valid_indices <- which(pi_values > 0)
+  Pi_r <- sum(pi_values[valid_indices] * data$s[valid_indices] * data$p[valid_indices]) /
+    total_infections
+  
+  # compute tau(r2)
+  tau_value <- Pi_r / Pi_all
+  
+  return(list(Pi_r = Pi_r, Pi_all = Pi_all, tau = tau_value))
+}
+
+
+
+####------------   tau function (including self, without weight) ------------####
+calculate_tau_r_incl_no_wt <- function(data, r2) {
+  library(geosphere) 
+  
+  # calculate distance matrix (unit: km)
+  distance_matrix <- as.matrix(distm(data[, c("lon", "lat")], fun = distHaversine))/1000
+  
+  # population weighted seroprevalence Pi(.)
+  total_infections <- sum(data$s * data$p)
+  total_samples <- sum(data$s)
+  Pi_all <- total_infections / total_samples
+  
+  # create empty vector for pi_i(r2)
+  pi_values <- numeric(nrow(data))
+  
+  # compute pi_i(r2) for all clusters
+  for (i in 1:nrow(data)) {
+    # find cluster within (0, r2] (include itself)
+    neighbors <- which(distance_matrix[i, ] >= 0 & distance_matrix[i, ] <= r2)
+    
+    # skip if no neighbors
+    if (length(neighbors) == 0) next
+    
+    # compute pi_i(r2)
+    s_p_j <- sum(data$s[neighbors] * data$p[neighbors])
+    s_j <- sum(data$s[neighbors])
+    pi_values[i] <- s_p_j / s_j
+  }
+  
+  # compute Pi(r2)
+  valid_indices <- which(pi_values > 0)
+  Pi_r <- sum(pi_values[valid_indices] * data$s[valid_indices] * data$p[valid_indices]) /
+    total_infections
+  
+  # compute tau(r2)
+  tau_value <- Pi_r / Pi_all
+  
+  return(list(Pi_r = Pi_r, Pi_all = Pi_all, tau = tau_value))
+}
+
+
+
+####------------ Running for bm14 only as an example ------------####
+
+# calculate tau for different r values
 r_vector <- seq(0, max(distance_matrix)/3, by = 10)
 tau_results_excl <- sapply(r_vector, function(r) calculate_tau_r_excl(cluster_data, r)$tau)
 tau_results_incl <- sapply(r_vector, function(r) calculate_tau_r_incl(cluster_data, r)$tau)
+tau_results_excl_no_wt <- sapply(r_vector, function(r) calculate_tau_r_excl_no_wt(cluster_data, r)$tau)
+tau_results_incl_no_wt <- sapply(r_vector, function(r) calculate_tau_r_incl_no_wt(cluster_data, r)$tau)
 
-tau_data <- data.frame(distance = r_vector, tau_excl = tau_results_excl, tau_incl = tau_results_incl)
-
-
-dev.off()  # Closes any open graphics devices
+# plot tau vs distance
+# dev.off()  # Closes any open graphics devices
+tau_data <- 
+  data.frame(distance = r_vector, tau_excl = tau_results_excl,
+             tau_incl = tau_results_incl, tau_excl_no_wt = tau_results_excl_no_wt, 
+             tau_incl_no_wt = tau_results_incl_no_wt)
 
 library(ggplot2)
 ggplot(data = tau_data, aes(x= distance)) +
@@ -299,9 +404,92 @@ ggplot(data = tau_data, aes(x= distance)) +
   geom_point(aes(y = tau_excl, color = "Excluding Self")) +
   geom_line(aes(y = tau_incl, color = "Including Self")) +
   geom_point(aes(y = tau_incl, color = "Including Self")) +
+  geom_line(aes(y = tau_excl_no_wt, color = "Excluding Self (No Wt)")) +
+  geom_point(aes(y = tau_excl_no_wt, color = "Excluding Self (No Wt)")) +
+  geom_line(aes(y = tau_incl_no_wt, color = "Including Self (No Wt)")) +
+  geom_point(aes(y = tau_incl_no_wt, color = "Including Self (No Wt)")) +
   geom_hline( yintercept = 1,linetype = "dashed") +
-  scale_color_manual(name = "Tau Method",values = c("Excluding Self" = "blue", "Including Self" = "red")) +
+  scale_color_manual(
+    name = "Tau Method",values = c("Excluding Self" = "#1ABC9C", 
+                                   "Excluding Self (No Wt)" = "#154360",
+                                   "Including Self" = "#F39B7FB2",
+                                   "Including Self (No Wt)" = "#DC0000B2")) +
   labs(x = "Distance (km)", y = "Tau", title = "Tau(bm14) vs Distance") +
   theme_minimal() +
   theme(legend.position = c(0.8, 0.9))
 
+####------------ Running for all antigens ------------####
+
+
+moz_selected <- moz_age %>% 
+  select(matches("pos_"), wt, cluster, lon, lat)
+pos_list <- colnames(moz_selected |> select(matches("pos_")))
+
+
+cluster_list <- lapply(pos_list, function(pos_col){
+  moz_selected <- moz_age |> select(matches(pos_col), wt, cluster, lon, lat)
+  
+  # aggregate data by cluster
+  cluster_data <- moz_selected %>%
+    group_by(cluster) %>%
+    summarise(
+      s = n(),
+      w = sum(wt),
+      p = mean(!!sym(pos_col)),
+      lon = mean(lon),
+      lat = mean(lat)
+    )
+  
+  # calculate tau for different r values
+  r_vector <- seq(0, max(distance_matrix)/3, by = 10)
+  tau_results_excl <- sapply(r_vector, function(r) calculate_tau_r_excl(cluster_data, r)$tau)
+  tau_results_incl <- sapply(r_vector, function(r) calculate_tau_r_incl(cluster_data, r)$tau)
+  tau_results_excl_no_wt <- sapply(r_vector, function(r) calculate_tau_r_excl_no_wt(cluster_data, r)$tau)
+  tau_results_incl_no_wt <- sapply(r_vector, function(r) calculate_tau_r_incl_no_wt(cluster_data, r)$tau)
+  
+  # plot tau vs distance
+  # dev.off()  # Closes any open graphics devices
+  tau_data <- 
+    data.frame(distance = r_vector, tau_excl = tau_results_excl,
+               tau_incl = tau_results_incl, tau_excl_no_wt = tau_results_excl_no_wt, 
+               tau_incl_no_wt = tau_results_incl_no_wt)
+  
+  return(tau_data)
+  
+})
+
+####------------ Plotting for all antigens ------------####
+
+library(ggplot2)
+library(purrr) 
+
+names(cluster_list) <- pos_list
+
+plots <- map2(cluster_list, names(cluster_list), function(data, name) {
+  ggplot(data, aes(x = distance)) +
+    geom_line(aes(y = tau_incl, color = "Including Self"), size = 1.2) +  # Thicker lines
+    geom_point(aes(y = tau_incl, color = "Including Self"), size = 2) +  # Larger points
+    geom_line(aes(y = tau_incl_no_wt, color = "Including Self (No Wt)"), size = 1.2) +
+    geom_point(aes(y = tau_incl_no_wt, color = "Including Self (No Wt)"), size = 2) +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    scale_color_manual(
+      name = "Tau Method",
+      values = c(
+        "Including Self" = "#F39B7FB2",
+        "Including Self (No Wt)" = "#DC0000B2"
+      )
+    ) +
+    scale_y_continuous(limits = c(0, 3.5), breaks = seq(0, 3.5, by = 0.5)) +  # Set y-axis intervals to 1
+    scale_x_continuous(limits = c(0, 100), breaks = seq(0, 100, by = 10)) +  # Set x-axis intervals to 10
+    labs(x = "Distance (km)", y = "Tau", title = paste("Tau(", name, ")")) +
+    theme_classic() +
+    theme(legend.position = "none")
+})
+
+print(plots)
+
+library(patchwork)
+
+combined_plot <- wrap_plots(plots, ncol = 3)
+
+print(combined_plot)
